@@ -8,14 +8,14 @@ const {
   deletePost,
   likePost,
 } = require('../controllers/postController');
-const { auth } = require('../middleware/auth');
+const { auth, optionalAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
 // Public routes
 router.get('/', getPosts);
 router.get('/featured', getFeaturedPosts);
-router.get('/:slug', getPostBySlug);
+router.get('/:slug', optionalAuth, getPostBySlug);
 
 // Protected routes
 router.post('/', auth, createPost);

@@ -7,6 +7,7 @@ const Tutorial = require('../models/Tutorial');
 const Software = require('../models/Software');
 const Publication = require('../models/Publication');
 const Settings = require('../models/Settings');
+const Person = require('../models/Person');
 
 // ---------- User Management ----------
 exports.getUsers = async (req, res) => {
@@ -135,7 +136,7 @@ exports.updateStaticContent = async (req, res) => {
     const updated = await Content.findOneAndUpdate(
       { pageKey },
       { content, title, lastEditedBy: req.user._id, $inc: { version: 1 } },
-      { upsert: true, new: true },
+      { upsert: true, returnDocument: 'after' },
     );
     res.json(updated);
   } catch (error) {
@@ -273,6 +274,53 @@ exports.deletePublication = async (req, res) => {
     const { id } = req.params;
     await Publication.findByIdAndDelete(id);
     res.json({ message: 'Publication deleted' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ---------- People Management ----------
+exports.getPeople = async (req, res) => {
+  try {
+    const people = await Person.find().sort({ order: 1, name: 1 });
+    res.json(people);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+exports.createPerson = async (req, res) => {
+  try {
+    const person = new Person(req.body);
+    await person.save();
+    res.status(201).json(person);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+exports.updatePerson = async (req, res) => {
+  try {
+    const person = await Person.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
+    if (!person) return res.status(404).json({ message: 'Person not found' });
+    res.json(person);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+exports.deletePerson = async (req, res) => {
+  try {
+    const person = await Person.findByIdAndDelete(req.params.id);
+    if (!person) return res.status(404).json({ message: 'Person not found' });
+    res.json({ message: 'Person deleted' });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });

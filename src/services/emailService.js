@@ -3,8 +3,7 @@ const { Resend } = require('resend');
 const dotenv = require('dotenv');
 
 dotenv.config();
-// Initialize Resend with your API key from environment variables
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 // The sender email address must be a verified domain in Resend
 const FROM_EMAIL = process.env.EMAIL_FROM || 'onboarding@resend.dev';
@@ -17,6 +16,11 @@ const FROM_EMAIL = process.env.EMAIL_FROM || 'onboarding@resend.dev';
  */
 exports.sendVerificationEmail = async (to, token) => {
   const verificationUrl = `${process.env.CLIENT_URL}/verify-email/${token}`;
+
+  if (!resend) {
+    console.log(`Verification email skipped. Verification URL for ${to}: ${verificationUrl}`);
+    return;
+  }
 
   try {
     const { data, error } = await resend.emails.send({
@@ -60,6 +64,11 @@ exports.sendVerificationEmail = async (to, token) => {
  */
 exports.sendPasswordResetEmail = async (to, token) => {
   const resetUrl = `${process.env.CLIENT_URL}/reset-password/${token}`;
+
+  if (!resend) {
+    console.log(`Password reset email skipped. Reset URL for ${to}: ${resetUrl}`);
+    return;
+  }
 
   try {
     const { data, error } = await resend.emails.send({

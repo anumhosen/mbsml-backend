@@ -23,6 +23,10 @@ const {
   createPublication,
   updatePublication,
   deletePublication,
+  getPeople,
+  createPerson,
+  updatePerson,
+  deletePerson,
   getSettings,
   updateSettings,
 } = require('../controllers/adminController');
@@ -67,6 +71,12 @@ router.get('/publications', getPublications);
 router.post('/publications', createPublication);
 router.put('/publications/:id', updatePublication);
 router.delete('/publications/:id', deletePublication);
+
+// People
+router.get('/people', getPeople);
+router.post('/people', createPerson);
+router.put('/people/:id', updatePerson);
+router.delete('/people/:id', deletePerson);
 
 // Settings
 router.get('/settings', getSettings);

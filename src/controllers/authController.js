@@ -1,7 +1,10 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const User = require('../models/User');
 const { generateVerificationToken, generateJWT } = require('../services/tokenService');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 // Register
 exports.register = async (req, res) => {
@@ -16,16 +19,37 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     const verificationToken = generateVerificationToken();
 
-    const user = new User({ name, email, password: hashedPassword, verificationToken });
+    const shouldAutoVerify = !process.env.RESEND_API_KEY && !isProduction;
+    const user = new User({
+      name,
+      email,
+      password: hashedPassword,
+      verificationToken: shouldAutoVerify ? null : verificationToken,
+      isVerified: shouldAutoVerify,
+    });
 
     await user.save();
 
-    // Send verification email using Resend
-    await sendVerificationEmail(email, verificationToken);
+    if (!shouldAutoVerify) {
+      try {
+        await sendVerificationEmail(email, verificationToken);
+      } catch (error) {
+        if (isProduction) throw error;
 
-    res
-      .status(201)
-      .json({ message: 'User created successfully. Please check your email for verification.' });
+        user.isVerified = true;
+        user.verificationToken = null;
+        await user.save();
+        console.warn(
+          `Verification email failed in development, so ${email} was auto-verified. Reason: ${error.message}`,
+        );
+      }
+    }
+
+    res.status(201).json({
+      message: user.isVerified
+        ? 'User created successfully. You can now log in.'
+        : 'User created successfully. Please check your email for verification.',
+    });
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -50,10 +74,21 @@ exports.forgotPassword = async (req, res) => {
     user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
     await user.save();
 
-    // Send password reset email using Resend
-    await sendPasswordResetEmail(email, resetToken);
+    let emailSent = true;
+    try {
+      await sendPasswordResetEmail(email, resetToken);
+    } catch (error) {
+      if (isProduction) throw error;
+      emailSent = false;
+      console.warn(
+        `Password reset email failed in development. Reset URL: ${process.env.CLIENT_URL}/reset-password/${resetToken}`,
+      );
+    }
 
-    res.status(200).json({ message: 'Password reset email sent' });
+    res.status(200).json({
+      message: emailSent ? 'Password reset email sent' : 'Password reset link generated',
+      resetToken: !isProduction ? resetToken : undefined,
+    });
   } catch (error) {
     console.error('Forgot password error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -116,5 +151,13 @@ exports.resetPassword = async (req, res) => {
 };
 
 exports.getMe = async (req, res) => {
-  res.json(req.user);
+  res.json({
+    id: req.user._id,
+    name: req.user.name,
+    email: req.user.email,
+    role: req.user.role,
+    avatar: req.user.avatar,
+    bio: req.user.bio,
+    isVerified: req.user.isVerified,
+  });
 };

@@ -14,9 +14,23 @@ const auth = async (req, res, next) => {
   }
 };
 
+const optionalAuth = async (req, res, next) => {
+  const token = req.cookies?.token || req.headers.authorization?.split(' ')[1];
+  if (!token) return next();
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = await User.findById(decoded.id).select('-password');
+  } catch (error) {
+    req.user = null;
+  }
+
+  next();
+};
+
 const isAdmin = (req, res, next) => {
   if (req.user && req.user.role === 'admin') return next();
   res.status(403).json({ message: 'Admin access required' });
 };
 
-module.exports = { auth, isAdmin };
+module.exports = { auth, optionalAuth, isAdmin };

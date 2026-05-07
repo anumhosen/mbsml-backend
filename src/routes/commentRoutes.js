@@ -1,9 +1,17 @@
 const express = require('express');
 const { auth } = require('../middleware/auth');
+const {
+  getComments,
+  addComment,
+  deleteComment,
+  likeComment,
+} = require('../controllers/commentController');
+
 const router = express.Router();
-// TODO: add comment endpoints
-router.get('/posts/:postSlug/comments', (req, res) => res.json({ comments: [] }));
-router.post('/', auth, (req, res) => res.json({}));
-router.delete('/:id', auth, (req, res) => res.json({}));
-router.post('/:id/like', auth, (req, res) => res.json({}));
+
+router.get('/posts/:postSlug/comments', getComments);
+router.post('/posts/:postSlug/comments', auth, addComment);
+router.delete('/comments/:id', auth, deleteComment);
+router.post('/comments/:id/like', auth, likeComment);
+
 module.exports = router;

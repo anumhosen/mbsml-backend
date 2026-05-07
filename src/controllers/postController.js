@@ -1,6 +1,7 @@
+const mongoose = require('mongoose');
 const Post = require('../models/Post');
 const Like = require('../models/Like');
-const User = require('../models/User');
+const { serializePost } = require('../utils/serializers');
 
 // Helper to generate slug from title (if not provided)
 const generateSlug = (title) => {
@@ -48,7 +49,7 @@ exports.getPosts = async (req, res) => {
     const allTags = await Post.distinct('tags', { status: 'published' });
 
     res.json({
-      posts,
+      posts: posts.map(serializePost),
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -71,7 +72,7 @@ exports.getFeaturedPosts = async (req, res) => {
       .sort({ publishedAt: -1 })
       .limit(parseInt(limit))
       .populate('author', 'name avatar');
-    res.json(posts);
+    res.json(posts.map(serializePost));
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -81,14 +82,20 @@ exports.getFeaturedPosts = async (req, res) => {
 // Get single post by slug
 exports.getPostBySlug = async (req, res) => {
   try {
-    const post = await Post.findOne({ slug: req.params.slug, status: 'published' }).populate(
-      'author',
-      'name avatar',
-    );
+    const post = await Post.findOne({ slug: req.params.slug }).populate('author', 'name avatar');
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
-    res.json(post);
+
+    const canViewDraft =
+      req.user &&
+      (req.user.role === 'admin' || post.author?._id?.toString() === req.user._id.toString());
+
+    if (post.status !== 'published' && !canViewDraft) {
+      return res.status(404).json({ message: 'Post not found' });
+    }
+
+    res.json(serializePost(post));
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -98,8 +105,6 @@ exports.getPostBySlug = async (req, res) => {
 // Create new post
 exports.createPost = async (req, res) => {
   try {
-    console.log('Request body:', req.body);
-    console.log('User:', req.user);
     const { title, content, excerpt, featuredImage, tags, status } = req.body;
     const slug = generateSlug(title);
 
@@ -121,7 +126,7 @@ exports.createPost = async (req, res) => {
     });
 
     await post.save();
-    res.status(201).json(post);
+    res.status(201).json(serializePost(post));
   } catch (error) {
     console.error('Create post error details:', error); // This will show the actual error
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -131,6 +136,10 @@ exports.createPost = async (req, res) => {
 // Update post
 exports.updatePost = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid post id' });
+    }
+
     const post = await Post.findById(req.params.id);
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
@@ -166,7 +175,7 @@ exports.updatePost = async (req, res) => {
     }
 
     await post.save();
-    res.json(post);
+    res.json(serializePost(post));
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -176,6 +185,10 @@ exports.updatePost = async (req, res) => {
 // Delete post
 exports.deletePost = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid post id' });
+    }
+
     const post = await Post.findById(req.params.id);
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
@@ -196,6 +209,10 @@ exports.deletePost = async (req, res) => {
 // Toggle like on post
 exports.likePost = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid post id' });
+    }
+
     const post = await Post.findById(req.params.id);
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });

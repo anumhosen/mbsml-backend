@@ -1,6 +1,20 @@
+const mongoose = require('mongoose');
 const Comment = require('../models/Comment');
 const Post = require('../models/Post');
 const Like = require('../models/Like');
+
+const normalizeComment = (comment) => ({
+  ...comment,
+  id: comment._id.toString(),
+  parentComment: comment.parentComment?.toString() || null,
+  author: comment.author
+    ? {
+        ...comment.author,
+        id: comment.author._id?.toString(),
+      }
+    : null,
+  replies: [],
+});
 
 // Helper to build nested comment tree from flat list
 const buildCommentTree = (comments) => {
@@ -8,7 +22,7 @@ const buildCommentTree = (comments) => {
   const roots = [];
 
   comments.forEach((comment) => {
-    commentMap.set(comment._id.toString(), { ...comment.toObject(), replies: [] });
+    commentMap.set(comment._id.toString(), normalizeComment(comment));
   });
 
   comments.forEach((comment) => {
@@ -31,8 +45,7 @@ exports.getComments = async (req, res) => {
     const { page = 1, limit = 20 } = req.query;
 
     // First find the post by slug
-    const PostModel = require('../models/Post');
-    const post = await PostModel.findOne({ slug: postSlug });
+    const post = await Post.findOne({ slug: postSlug });
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
@@ -43,22 +56,13 @@ exports.getComments = async (req, res) => {
       .populate('author', 'name avatar')
       .lean();
 
-    // Apply pagination to root comments only (simplified: we get all, then paginate roots)
-    let roots = comments.filter((c) => !c.parentComment);
-    const total = roots.length;
+    const tree = buildCommentTree(comments);
+    const total = tree.length;
     const start = (parseInt(page) - 1) * parseInt(limit);
-    const paginatedRoots = roots.slice(start, start + parseInt(limit));
-
-    // Get only the comments that are in paginatedRoots or are replies to them
-    const rootIds = paginatedRoots.map((r) => r._id);
-    const relevantComments = comments.filter(
-      (c) => rootIds.includes(c._id) || (c.parentComment && rootIds.includes(c.parentComment)),
-    );
-
-    const nested = buildCommentTree(relevantComments);
+    const paginatedRoots = tree.slice(start, start + parseInt(limit));
 
     res.json({
-      comments: nested,
+      comments: paginatedRoots,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -75,25 +79,31 @@ exports.getComments = async (req, res) => {
 // Add a comment (or reply)
 exports.addComment = async (req, res) => {
   try {
-    const { postId, content, parentId } = req.body;
+    const { postSlug } = req.params;
+    const { content, parentId } = req.body;
 
-    // Verify post exists
-    const PostModel = require('../models/Post');
-    const post = await PostModel.findById(postId);
+    if (!content?.trim()) {
+      return res.status(400).json({ message: 'Comment content is required' });
+    }
+
+    if (parentId && !mongoose.Types.ObjectId.isValid(parentId)) {
+      return res.status(400).json({ message: 'Invalid parent comment id' });
+    }
+
+    const post = await Post.findOne({ slug: postSlug });
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
     }
 
     const comment = new Comment({
-      post: postId,
+      post: post._id,
       author: req.user._id,
       parentComment: parentId || null,
       content,
     });
     await comment.save();
 
-    // Increment post's commentsCount
-    await PostModel.findByIdAndUpdate(postId, { $inc: { commentsCount: 1 } });
+    await Post.findByIdAndUpdate(post._id, { $inc: { commentsCount: 1 } });
 
     // Populate author info
     await comment.populate('author', 'name avatar');
@@ -108,6 +118,10 @@ exports.addComment = async (req, res) => {
 // Delete comment (author or admin)
 exports.deleteComment = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid comment id' });
+    }
+
     const comment = await Comment.findById(req.params.id);
     if (!comment) {
       return res.status(404).json({ message: 'Comment not found' });
@@ -118,23 +132,21 @@ exports.deleteComment = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    // Recursively delete all replies (optional: you can also just mark as deleted)
-    // For simplicity, we'll delete all child comments
+    let deletedCount = 1;
     const deleteReplies = async (parentId) => {
       const replies = await Comment.find({ parentComment: parentId });
       for (const reply of replies) {
         await deleteReplies(reply._id);
         await reply.deleteOne();
+        deletedCount += 1;
       }
     };
     await deleteReplies(comment._id);
     await comment.deleteOne();
 
-    // Decrement post's commentsCount by the number of deleted comments (including replies)
-    // For accuracy, recalc or just decrement 1; we'll leave to a periodic sync.
-    // Simple: decrement 1 for this comment only.
-    const PostModel = require('../models/Post');
-    await PostModel.findByIdAndUpdate(comment.post, { $inc: { commentsCount: -1 } });
+    await Post.findByIdAndUpdate(comment.post, {
+      $inc: { commentsCount: -deletedCount },
+    });
 
     res.json({ message: 'Comment deleted' });
   } catch (error) {
@@ -146,6 +158,10 @@ exports.deleteComment = async (req, res) => {
 // Toggle like on comment
 exports.likeComment = async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid comment id' });
+    }
+
     const comment = await Comment.findById(req.params.id);
     if (!comment) {
       return res.status(404).json({ message: 'Comment not found' });
